@@ -143,9 +143,6 @@ def parse_args():
         default=None,
         help="Save standalone LoRA weights every X steps (in addition to checkpoints).",
     )
-    parser.add_argument(
-        "--validation_prompt", type=str, default="90s fashion", help="A prompt that is sampled during training for inference."
-    )
     parser.add_argument("--seed", type=int, default=1337, help="A seed for reproducible training.")
     parser.add_argument(
         "--caption_column",
