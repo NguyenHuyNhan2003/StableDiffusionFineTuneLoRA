@@ -1,3 +1,20 @@
+#!/usr/bin/env python
+# coding=utf-8
+# Copyright 2025 The HuggingFace Inc. team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Fine-tuning script for Stable Diffusion for text2image with support for LoRA."""
+
 import argparse
 import logging
 import math
@@ -70,18 +87,18 @@ def parse_args():
         help="whether to randomly flip images horizontally",
     )
     parser.add_argument(
-        "--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader."
+        "--train_batch_size", type=int, default=1, help="Batch size (per device) for the training dataloader."
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
-        default=1,
+        default=4,
         help="Number of updates steps to accumulate before performing a backward/update pass.",
     )
     parser.add_argument(
         "--max_train_steps",
         type=int,
-        default=None,
+        default=1000,
         help="Total number of training steps to perform.",
     )
     parser.add_argument(
@@ -96,14 +113,14 @@ def parse_args():
     parser.add_argument(
         "--mixed_precision",
         type=str,
-        default=None,
+        default="fp16",
         choices=["no", "fp16", "bf16"],
         help="Whether to use mixed precision.",
     )
     parser.add_argument(
         "--lr_scheduler",
         type=str,
-        default="constant",
+        default="cosine",
         help='The scheduler type to use.',
     )
     parser.add_argument(
@@ -122,14 +139,20 @@ def parse_args():
         help="Save a checkpoint of the training state every X updates.",
     )
     parser.add_argument(
-        "--validation_prompt", type=str, default=None, help="A prompt that is sampled during training for inference."
+        "--validation_prompt", type=str, default="90s fashion", help="A prompt that is sampled during training for inference."
     )
-    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+    parser.add_argument("--seed", type=int, default=1337, help="A seed for reproducible training.")
     parser.add_argument(
         "--caption_column",
         type=str,
-        default="text",
+        default="additional_feature",
         help="The column of the dataset containing a caption or a list of captions.",
+    )
+    parser.add_argument(
+        "--image_column",
+        type=str,
+        default="image",
+        help="The column of the dataset containing the images.",
     )
 
     args = parser.parse_args()
@@ -229,6 +252,10 @@ def main():
     caption_column = args.caption_column
     if caption_column not in column_names:
         raise ValueError(f"--caption_column' value '{args.caption_column}' needs to be one of: {', '.join(column_names)}")
+
+    image_column = args.image_column
+    if image_column not in column_names:
+        raise ValueError(f"--image_column' value '{args.image_column}' needs to be one of: {', '.join(column_names)}")
 
     interpolation = transforms.InterpolationMode.BILINEAR
     train_transforms = transforms.Compose(
