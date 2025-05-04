@@ -411,7 +411,8 @@ def main():
         unwrapped_unet = accelerator.unwrap_model(unet)
         save_lora_weights(final_lora_path, unwrapped_unet)
         
-        # Also save the full pipeline for easy inference
+        # Save the full pipeline for easy inference
+        '''
         pipeline = DiffusionPipeline.from_pretrained(
             args.pretrained_model_name_or_path,
             unet=accelerator.unwrap_model(unet),
@@ -419,6 +420,7 @@ def main():
         )
         pipeline.save_pretrained(os.path.join(args.output_dir, "full-pipeline"))
         logger.info("Saved full pipeline for inference")
+        '''
 
 if __name__ == "__main__":
     main()
