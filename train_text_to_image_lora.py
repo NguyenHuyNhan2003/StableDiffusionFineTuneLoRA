@@ -106,20 +106,22 @@ def main():
         args.pretrained_model_name_or_path, subfolder="unet"
     )
 
-    unet.requires_grad_(False)
+    # Freeze pre-trained models
     text_encoder.requires_grad_(False)
     vae.requires_grad_(False)
+    unet.requires_grad_(False)
 
+    # Apply LoRA using diffusers
+    from diffusers.models.lora import LoraConfig
     lora_config = LoraConfig(
         r=4,
         lora_alpha=16,
-        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
-        lora_dropout=0.1,
-        bias="none",
-        task_type="CAUSAL_LM"
+        target_modules=["to_q", "to_k", "to_v", "to_out.0"],
+        lora_dropout=0.1
     )
-    unet = get_peft_model(unet, lora_config)
+    unet.add_adapter(lora_config)
 
+    # Prepare dataset
     dataset = CustomDataset(
         args.train_data_dir, tokenizer,
         size=args.resolution,
@@ -127,13 +129,17 @@ def main():
         random_flip=args.random_flip,
         caption_column=args.caption_column
     )
-
     train_dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.train_batch_size,
-        shuffle=True, num_workers=args.dataloader_num_workers
+        dataset,
+        batch_size=args.train_batch_size,
+        shuffle=True,
+        num_workers=args.dataloader_num_workers
     )
 
-    optimizer = torch.optim.AdamW(unet.parameters(), lr=args.learning_rate)
+    # Use only trainable LoRA parameters
+    trainable_params = [p for p in unet.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(trainable_params, lr=args.learning_rate)
+
     lr_scheduler = get_scheduler(
         args.lr_scheduler,
         optimizer=optimizer,
@@ -141,12 +147,13 @@ def main():
         num_training_steps=args.max_train_steps,
     )
 
+    # Accelerator prep
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         unet, optimizer, train_dataloader, lr_scheduler
     )
 
     global_step = 0
-    for epoch in range(100000):  # effectively infinite loop
+    for epoch in range(100000):  # infinite loop simulation
         for batch in train_dataloader:
             with accelerator.accumulate(unet):
                 outputs = unet(pixel_values=batch["pixel_values"], input_ids=batch["input_ids"])
