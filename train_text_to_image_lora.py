@@ -11,7 +11,7 @@ import accelerate
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
-from diffusers import StableDiffusionPipeline, DDPMScheduler
+from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, StableDiffusionPipeline, UNet2DConditionModel
 from diffusers.optimization import get_scheduler
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from PIL import Image
