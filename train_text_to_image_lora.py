@@ -113,7 +113,7 @@ def main():
     lora_config = LoraConfig(
         r=4,
         lora_alpha=16,
-        target_modules=["to_k", "to_q", "to_v", "to_out.0"],,
+        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         lora_dropout=0.1,
         bias="none",
         task_type="CAUSAL_LM"
