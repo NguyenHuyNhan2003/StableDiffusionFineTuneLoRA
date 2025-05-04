@@ -32,6 +32,22 @@ from diffusers.utils.torch_utils import is_compiled_module
 
 logger = get_logger(__name__, log_level="INFO")
 
+def save_lora_weights(save_path, unet, text_encoder=None, safe_serialization=True):
+    """Save LoRA weights separately for easy sharing and integration"""
+    # Create directory if it doesn't exist
+    os.makedirs(save_path, exist_ok=True)
+    
+    # Save UNet LoRA weights
+    unet_lora_state_dict = get_peft_model_state_dict(unet)
+    StableDiffusionPipeline.save_lora_weights(
+        save_directory=save_path,
+        unet_lora_layers=unet_lora_state_dict,
+        text_encoder_lora_layers=None,
+        safe_serialization=safe_serialization,
+    )
+    
+    logger.info(f"Saved LoRA weights to {save_path}")
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
     parser.add_argument(
@@ -122,6 +138,12 @@ def parse_args():
         help="Save a checkpoint of the training state every X updates.",
     )
     parser.add_argument(
+        "--save_lora_steps",
+        type=int,
+        default=None,
+        help="Save standalone LoRA weights every X steps (in addition to checkpoints).",
+    )
+    parser.add_argument(
         "--validation_prompt", type=str, default="90s fashion", help="A prompt that is sampled during training for inference."
     )
     parser.add_argument("--seed", type=int, default=1337, help="A seed for reproducible training.")
@@ -145,6 +167,10 @@ def parse_args():
 
     if args.train_data_dir is None:
         raise ValueError("Need a training folder.")
+
+    # Set default save_lora_steps to match checkpointing_steps if not provided
+    if args.save_lora_steps is None:
+        args.save_lora_steps = args.checkpointing_steps
 
     return args
 
@@ -358,25 +384,44 @@ def main():
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 global_step += 1
-                train_loss = 0.0
-
+                
+                # Save checkpoint
                 if global_step % args.checkpointing_steps == 0 and accelerator.is_main_process:
-                    save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                    accelerator.save_state(save_path)
-                    logger.info(f"Saved state to {save_path}")
+                    checkpoint_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                    accelerator.save_state(checkpoint_path)
+                    logger.info(f"Saved checkpoint to {checkpoint_path}")
+                
+                # Save standalone LoRA weights
+                if global_step % args.save_lora_steps == 0 and accelerator.is_main_process:
+                    lora_path = os.path.join(args.output_dir, f"lora-weights-{global_step}")
+                    unwrapped_unet = accelerator.unwrap_model(unet)
+                    save_lora_weights(lora_path, unwrapped_unet)
+                
+                train_loss = 0.0
 
             if global_step >= args.max_train_steps:
                 break
 
-    accelerator.wait_for_everyone()
+    # Final save
     if accelerator.is_main_process:
-        unet = unet.to(torch.float32)
+        # Save final checkpoint
+        final_checkpoint_path = os.path.join(args.output_dir, "final-checkpoint")
+        accelerator.save_state(final_checkpoint_path)
+        logger.info(f"Saved final checkpoint to {final_checkpoint_path}")
+        
+        # Save final LoRA weights
+        final_lora_path = os.path.join(args.output_dir, "final-lora-weights")
+        unwrapped_unet = accelerator.unwrap_model(unet)
+        save_lora_weights(final_lora_path, unwrapped_unet)
+        
+        # Also save the full pipeline for easy inference
         pipeline = DiffusionPipeline.from_pretrained(
             args.pretrained_model_name_or_path,
+            unet=accelerator.unwrap_model(unet),
             torch_dtype=weight_dtype,
         )
-        pipeline.unet.load_attn_procs(args.output_dir)
-        pipeline.save_pretrained(args.output_dir)
+        pipeline.save_pretrained(os.path.join(args.output_dir, "full-pipeline"))
+        logger.info("Saved full pipeline for inference")
 
 if __name__ == "__main__":
     main()
