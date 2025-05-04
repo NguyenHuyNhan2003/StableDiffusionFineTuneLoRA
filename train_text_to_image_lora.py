@@ -110,9 +110,7 @@ def main():
     text_encoder.requires_grad_(False)
     vae.requires_grad_(False)
     unet.requires_grad_(False)
-
-    # Apply LoRA using diffusers
-    from diffusers.models.lora import LoraConfig
+    
     lora_config = LoraConfig(
         r=4,
         lora_alpha=16,
