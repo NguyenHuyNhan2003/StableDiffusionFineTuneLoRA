@@ -93,10 +93,18 @@ def main():
     accelerator = Accelerator(mixed_precision=args.mixed_precision)
     set_seed(args.seed)
 
-    tokenizer = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path)
-    text_encoder = CLIPTextModel.from_pretrained(args.pretrained_model_name_or_path)
-    vae = StableDiffusionPipeline.from_pretrained(args.pretrained_model_name_or_path).vae
-    unet = StableDiffusionPipeline.from_pretrained(args.pretrained_model_name_or_path).unet
+    tokenizer = CLIPTokenizer.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="tokenizer"
+    )
+    text_encoder = CLIPTextModel.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="text_encoder"
+    )
+    vae = AutoencoderKL.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="vae"
+    )
+    unet = UNet2DConditionModel.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="unet"
+    )
 
     unet.requires_grad_(False)
     text_encoder.requires_grad_(False)
