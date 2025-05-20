@@ -231,7 +231,7 @@ def parse_args():
     )
     parser.add_argument(
         "--training_era",
-        type=int,
+        type=str,
         default="90s",
         help=(
             "The era of the training data. This is used to determine the style of the generated images."
