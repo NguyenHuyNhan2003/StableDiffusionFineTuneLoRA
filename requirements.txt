@@ -6,4 +6,5 @@ ftfy
 tensorboard
 Jinja2
 peft==0.15.0
+wandb
 git+https://github.com/huggingface/diffusers.git
