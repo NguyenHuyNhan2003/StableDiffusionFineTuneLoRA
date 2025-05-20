@@ -63,19 +63,22 @@ def log_validation(
     images = []
     captions = []
     
-    for prompt in validation_prompts:
-        for _ in range(args.num_validation_images):
-            image = pipeline(prompt, num_inference_steps=30, generator=generator).images[0]
-            images.append(image)
-            captions.append(prompt)
+    autocast_ctx = torch.autocast(accelerator.device.type) if not torch.backends.mps.is_available() else nullcontext()
+    with autocast_ctx:
+        for prompt in validation_prompts:
+            for _ in range(args.num_validation_images):
+                image = pipeline(prompt, num_inference_steps=30, generator=generator).images[0]
+                images.append(image)
+                captions.append(prompt)
     
     for tracker in accelerator.trackers:
         phase_name = "test" if is_final_validation else "validation"
         if tracker.name == "wandb":
+            logger.info(f"Logging {len(images)} images to W&B for {phase_name}")
             tracker.log(
                 {
                     phase_name: [
-                        wandb.Image(image, caption=f"{i}: {caption}") 
+                        wandb.Image(image, caption=f"{i}: {caption}")
                         for i, (image, caption) in enumerate(zip(images, captions))
                     ]
                 }
