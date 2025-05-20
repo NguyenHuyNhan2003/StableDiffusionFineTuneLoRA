@@ -262,9 +262,12 @@ def main():
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
+        log_with="wandb",
         project_config=accelerator_project_config,
-        log_with="wandb" if is_wandb_available() else None,
     )
+    
+    if accelerator.is_main_process:
+        accelerator.init_trackers("text2image-fine-tune", config=vars(args))
 
     if torch.backends.mps.is_available():
         accelerator.native_amp = False
