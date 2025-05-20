@@ -30,7 +30,58 @@ from diffusers.training_utils import cast_training_params
 from diffusers.utils import is_wandb_available
 from diffusers.utils.torch_utils import is_compiled_module
 
+if is_wandb_available():
+    import wandb
+
 logger = get_logger(__name__, log_level="INFO")
+
+def log_validation(
+    pipeline,
+    args,
+    accelerator,
+    epoch,
+    is_final_validation=False,
+):
+    era = args.training_era
+    validation_prompts = validation_prompts = [
+        f"a person wearing clothes inspired by early {era} rock icons",
+        f"a person dressed in a {era}-inspired urban outfit",
+        f"a person in light summer clothes like in {era} ads",
+        f"a person wearing a winter outfit like {era} fashion magazines",
+    ]
+    
+    logger.info(
+        f"Running validation... \n Generating {args.num_validation_images} images for each of {len(validation_prompts)} prompts."
+    )
+    
+    pipeline = pipeline.to(accelerator.device)
+    pipeline.set_progress_bar_config(disable=True)
+    generator = torch.Generator(device=accelerator.device)
+    if args.seed is not None:
+        generator = generator.manual_seed(args.seed)
+    
+    images = []
+    captions = []
+    
+    for prompt in validation_prompts:
+        for _ in range(args.num_validation_images):
+            image = pipeline(prompt, num_inference_steps=30, generator=generator).images[0]
+            images.append(image)
+            captions.append(prompt)
+    
+    for tracker in accelerator.trackers:
+        phase_name = "test" if is_final_validation else "validation"
+        if tracker.name == "wandb":
+            tracker.log(
+                {
+                    phase_name: [
+                        wandb.Image(image, caption=f"{i}: {caption}") 
+                        for i, (image, caption) in enumerate(zip(images, captions))
+                    ]
+                }
+            )
+    
+    return images
 
 def save_lora_weights(save_path, unet, text_encoder=None, safe_serialization=True):
     """Save LoRA weights separately for easy sharing and integration"""
@@ -157,6 +208,36 @@ def parse_args():
         default="image",
         help="The column of the dataset containing the images.",
     )
+    parser.add_argument(
+        "--validation_prompt",
+        type=str,
+        default=None,
+        help="A prompt that is sampled during training for inference.",
+    )
+    parser.add_argument(
+        "--num_validation_images",
+        type=int,
+        default=2,
+        help="Number of images that should be generated during validation with `validation_prompt`.",
+    )
+    parser.add_argument(
+        "--validation_epochs",
+        type=int,
+        default=1,
+        help=(
+            "Run fine-tuning validation every X epochs. The validation process consists of running the prompt"
+            " `args.validation_prompt` multiple times: `args.num_validation_images`."
+        ),
+    )
+    parser.add_argument(
+        "--training_era",
+        type=int,
+        default="90s",
+        help=(
+            "The era of the training data. This is used to determine the style of the generated images."
+            " Options are: '90s', '2000s', '2020s'."
+        ),
+    )
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -182,6 +263,7 @@ def main():
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         project_config=accelerator_project_config,
+        log_with="wandb" if is_wandb_available() else None,
     )
 
     if torch.backends.mps.is_available():
@@ -382,6 +464,8 @@ def main():
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 global_step += 1
+                accelerator.log({"train_loss": train_loss}, step=global_step)
+                train_loss = 0.0
                 
                 # Save checkpoint
                 if global_step % args.checkpointing_steps == 0 and accelerator.is_main_process:
@@ -395,10 +479,24 @@ def main():
                     unwrapped_unet = accelerator.unwrap_model(unet)
                     save_lora_weights(lora_path, unwrapped_unet)
                 
-                train_loss = 0.0
-
             if global_step >= args.max_train_steps:
                 break
+
+        # Validation
+        if accelerator.is_main_process:
+            if args.validation_prompt is not None and epoch % args.validation_epochs == 0:
+                logger.info(f"Running validation... \n Generating {args.num_validation_images} images.")
+                # create pipeline
+                pipeline = DiffusionPipeline.from_pretrained(
+                    args.pretrained_model_name_or_path,
+                    unet=accelerator.unwrap_model(unet),
+                    torch_dtype=weight_dtype,
+                )
+
+                images = log_validation(pipeline, args, accelerator, epoch)
+
+                del pipeline
+                torch.cuda.empty_cache()
 
     # Final save
     if accelerator.is_main_process:
@@ -412,16 +510,18 @@ def main():
         unwrapped_unet = accelerator.unwrap_model(unet)
         save_lora_weights(final_lora_path, unwrapped_unet)
         
-        # Save the full pipeline for easy inference
-        '''
-        pipeline = DiffusionPipeline.from_pretrained(
-            args.pretrained_model_name_or_path,
-            unet=accelerator.unwrap_model(unet),
-            torch_dtype=weight_dtype,
-        )
-        pipeline.save_pretrained(os.path.join(args.output_dir, "full-pipeline"))
-        logger.info("Saved full pipeline for inference")
-        '''
+        # Run final validation if specified
+        if args.validation_prompt is not None:
+            pipeline = DiffusionPipeline.from_pretrained(
+                args.pretrained_model_name_or_path,
+                unet=accelerator.unwrap_model(unet),
+                torch_dtype=weight_dtype,
+            )
+            
+            images = log_validation(pipeline, args, accelerator, epoch, is_final_validation=True)
+            
+            del pipeline
+            torch.cuda.empty_cache()
 
 if __name__ == "__main__":
     main()
