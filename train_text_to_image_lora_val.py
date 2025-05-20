@@ -211,7 +211,7 @@ def parse_args():
     parser.add_argument(
         "--validation_prompt",
         type=str,
-        default="90s fashion",
+        default=None,
         help="A prompt that is sampled during training for inference.",
     )
     parser.add_argument(
