@@ -43,7 +43,7 @@ def log_validation(
     is_final_validation=False,
 ):
     era = args.training_era
-    validation_prompts = validation_prompts = [
+    validation_prompts = [
         f"a person wearing clothes inspired by early {era} rock icons",
         f"a person dressed in a {era}-inspired urban outfit",
         f"a person in light summer clothes like in {era} ads",
@@ -211,7 +211,7 @@ def parse_args():
     parser.add_argument(
         "--validation_prompt",
         type=str,
-        default=None,
+        default="90s fashion",
         help="A prompt that is sampled during training for inference.",
     )
     parser.add_argument(
