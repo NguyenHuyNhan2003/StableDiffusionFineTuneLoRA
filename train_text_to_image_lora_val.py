@@ -35,6 +35,46 @@ if is_wandb_available():
 
 logger = get_logger(__name__, log_level="INFO")
 
+def log_baseline_images(args, accelerator):
+    era = args.training_era
+    prompts = [
+        f"a person wearing clothes inspired by early {era} rock icons",
+        f"a person dressed in a {era}-inspired urban outfit",
+        f"a person in light summer clothes like in {era} ads",
+        f"a person wearing a winter outfit like {era} fashion magazines",
+    ]
+
+    pipeline = DiffusionPipeline.from_pretrained(
+        args.pretrained_model_name_or_path,
+        torch_dtype=torch.float16 if accelerator.mixed_precision == "fp16" else torch.float32
+    ).to(accelerator.device)
+
+    pipeline.set_progress_bar_config(disable=True)
+    generator = torch.Generator(device=accelerator.device)
+    if args.seed is not None:
+        generator = generator.manual_seed(args.seed)
+
+    images = []
+    captions = []
+
+    with torch.autocast(accelerator.device.type):
+        for prompt in prompts:
+            for _ in range(args.num_validation_images):
+                image = pipeline(prompt, num_inference_steps=30, generator=generator).images[0]
+                images.append(image)
+                captions.append(prompt)
+
+    for tracker in accelerator.trackers:
+        if tracker.name == "wandb":
+            tracker.log({
+                "baseline": [
+                    wandb.Image(image, caption=f"{i}: {caption}")
+                    for i, (image, caption) in enumerate(zip(images, captions))
+                ]
+            })
+
+    logger.info(f"Logged baseline images before fine-tuning.")
+    
 def log_validation(
     pipeline,
     args,
@@ -437,6 +477,10 @@ def main():
         desc="Steps",
         disable=not accelerator.is_local_main_process,
     )
+    
+    if accelerator.is_main_process:
+        logger.info("Generating baseline images before training...")
+        log_baseline_images(args, accelerator)
 
     for epoch in range(first_epoch, math.ceil(args.max_train_steps / num_update_steps_per_epoch)):
         unet.train()
@@ -482,10 +526,10 @@ def main():
                 train_loss = 0.0
                 
                 # Save checkpoint
-                if global_step % args.checkpointing_steps == 0 and accelerator.is_main_process:
-                    checkpoint_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                    accelerator.save_state(checkpoint_path)
-                    logger.info(f"Saved checkpoint to {checkpoint_path}")
+                # if global_step % args.checkpointing_steps == 0 and accelerator.is_main_process:
+                #     checkpoint_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                #     accelerator.save_state(checkpoint_path)
+                #     logger.info(f"Saved checkpoint to {checkpoint_path}")
                 
                 # Save standalone LoRA weights
                 if global_step % args.save_lora_steps == 0 and accelerator.is_main_process:
@@ -515,9 +559,9 @@ def main():
     # Final save
     if accelerator.is_main_process:
         # Save final checkpoint
-        final_checkpoint_path = os.path.join(args.output_dir, "final-checkpoint")
-        accelerator.save_state(final_checkpoint_path)
-        logger.info(f"Saved final checkpoint to {final_checkpoint_path}")
+        # final_checkpoint_path = os.path.join(args.output_dir, "final-checkpoint")
+        # accelerator.save_state(final_checkpoint_path)
+        # logger.info(f"Saved final checkpoint to {final_checkpoint_path}")
         
         # Save final LoRA weights
         final_lora_path = os.path.join(args.output_dir, "final-lora-weights")
